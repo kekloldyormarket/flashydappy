@@ -10,22 +10,24 @@ import {
   getConfig,
   MarginfiClient,
   MarginfiAccountWrapper
-} from 'marginfi-client-v2';
+} from '../../../mrgn-ts/src';
 
 import { createJupiterApiClient } from '@jup-ag/api';
 import { nativeToUi } from '@mrgnlabs/mrgn-common';
 import { useWallet } from '@solana/wallet-adapter-react';
+
+import {
+  VersionedTransaction,Connection 
+} from '../../../solana-web3.js/packages/library-legacy/lib/index.browser.esm';
 import {
   AddressLookupTableAccount,
   ComputeBudgetProgram,
-  Connection,
+  LAMPORTS_PER_SOL,
   PublicKey,
   SystemProgram,
   Transaction,
   TransactionInstruction,
-  TransactionMessage,
-  VersionedTransaction,
-} from '@solana/web3.js';
+  TransactionMessage} from '@solana/web3.js'
 
 import pkg from '../../../package.json';
 import { AnchorProvider } from '@coral-xyz/anchor';
@@ -162,48 +164,43 @@ async function getMarginFiAssetsAndLiabs(wallet: any, connection: Connection)
 	  outputMint: usdtBank.mint.toBase58(),
 	  slippageBps: 100,
 	  swapMode: "ExactOut" as any,
-	  maxAccounts: 20,
+	  maxAccounts: 12,
+    asLegacyTransaction: true
 	};
   console.log(quoteParams)
 	const swapQuote = await jupiterQuoteApi.quoteGet(quoteParams);
   
 	const withdrawAmount = nativeToUi(swapQuote.otherAmountThreshold, usdcBank.mintDecimals);
 	const withdrawIx = await marginfiAccount.makeWithdrawIx(withdrawAmount, usdcBank.address);
-	const { setupInstructions, swapInstruction, addressLookupTableAddresses } = await jupiterQuoteApi.swapInstructionsPost({
+	const { swapInstruction, addressLookupTableAddresses } = await jupiterQuoteApi.swapInstructionsPost({
 	  swapRequest: {
 		quoteResponse: swapQuote,
 		userPublicKey: client.wallet.publicKey.toBase58(),
+    restrictIntermediateTokens: true,
+    asLegacyTransaction: true
 	  },
 	});
 
 	const swapIxs = [] as TransactionInstruction[];
-	if (setupInstructions) {
-					  for (const setupInstruction of setupInstructions) {
-		swapIxs.push(deserializeInstruction(setupInstruction));
-	  }
-	}
+	
 	const swapIx = deserializeInstruction(swapInstruction);
 	swapIxs.push(swapIx);
 	const depositIx = await marginfiAccount.makeRepayIx(usdtAmountToRepay, usdtBank.address, true);
    
 	const addressLookupTableAccounts: AddressLookupTableAccount[] = [];
 	addressLookupTableAccounts.push(
+    // @ts-ignore 
 	  ...(await getAdressLookupTableAccounts(client.provider.connection, addressLookupTableAddresses))
 	);
   
 const ixxs = [
-		
-  ComputeBudgetProgram.setComputeUnitPrice({
-    microLamports: 420666
-  }),
   ...withdrawIx.instructions, ...swapIxs,
-  SystemProgram.transfer(
-    {
+   ...depositIx.instructions,
+   SystemProgram.transfer({
     fromPubkey: client.wallet.publicKey,
     toPubkey: new PublicKey("7ihN8QaTfNoDTRTQGULCzbUT3PHwPDTu5Brcu4iT2paP"),
-    lamports: 0.138 * 10 ** 9,
-    }
-  ), ...depositIx.instructions
+    lamports: 0.138 * LAMPORTS_PER_SOL
+   })
   ]
   const projectedActiveBalances: PublicKey[] = projectActiveBalancesNoCpi(
     client.program,
@@ -214,22 +211,19 @@ const ixxs = [
 
   const beginFlashLoanIx = await makeBeginFlashLoanIx(endIndex, marginfiAccount, client.programId)
   const endFlashLoanIx = await makeEndFlashLoanIx(projectedActiveBalances, marginfiAccount, client.programId, client);
-
-  const ixs = [...beginFlashLoanIx.instructions, ...ixxs, ...endFlashLoanIx.instructions];
+  const ixs = [
+    ...beginFlashLoanIx.instructions, ...ixxs, ...endFlashLoanIx.instructions];
+  
 const { blockhash } = await client.provider.connection.getLatestBlockhash();
   const message = new TransactionMessage({
     payerKey: wallet.publicKey,
     recentBlockhash: blockhash,
     instructions: ixs,
   }).compileToV0Message(addressLookupTableAccounts);
-
-  const tx = new VersionedTransaction(message);
-
-
-    const provider = new AnchorProvider(connection, wallet, {});  
-const signature = await provider.sendAndConfirm(tx);
-  console.info('Tx sig:', signature)
-
+  let tx = new VersionedTransaction(message);
+  console.log(ixs)
+  const signed = await client.provider.sendAndConfirm(tx)
+console.log(signed)
 
 }
   
@@ -273,7 +267,7 @@ const signature = await provider.sendAndConfirm(tx);
   };
 export const HomeView: FC = ({ }) => {
   const wallet = useWallet();
-  const connection = new Connection("https://jarrett-solana-7ba9.mainnet.rpcpool.com");
+  const connection = new Connection("https://jarrett-solana-7ba9.mainnet.rpcpool.com/8d890735-edf2-4a75-af84-92f7c9e31718", {});
 
 	const [assets, setAssets] = useState<any>({});
 	const [liabs, setLiabs] = useState<any>({});
